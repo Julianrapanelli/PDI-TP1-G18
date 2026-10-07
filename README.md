@@ -11,18 +11,15 @@ Trabajo Práctico N° 1 de **Procesamiento de Imágenes I (IA 4.4)**, Tecnicatur
 | **1. Ecualización local de histograma** | Revela detalles ocultos en zonas de una imagen donde la ecualización global no alcanza. |
 | **2. Validación de planillas de calificaciones** | Lee una planilla escaneada, valida cada campo de cada registro y genera un CSV y una imagen con los alumnos que no aprobaron. |
 
-<p align="center">
-  <img src="docs/img/p2_05_validaciones.png" width="85%" alt="Las cuatro planillas validadas: cada celda en verde si está bien cargada y en rojo si no">
-  <br><em>Resultado del Problema 2 sobre las cuatro planillas: verde = OK, rojo = MAL.</em>
-</p>
+El análisis completo está en el [informe](docs/Informe%20TP-PDI-G18.pdf).
 
 ## Contenido
 
 - [Instalación](#instalación)
 - [Uso](#uso)
 - [Estructura del repositorio](#estructura-del-repositorio)
-- [Problema 1 – Ecualización local de histograma](#problema-1--ecualización-local-de-histograma)
-- [Problema 2 – Validación de planillas](#problema-2--validación-de-planillas)
+- [Problema 1](#problema-1)
+- [Problema 2](#problema-2)
 - [Integrantes](#integrantes)
 
 ## Instalación
@@ -31,7 +28,7 @@ Requiere Python 3.10 o superior.
 
 ```bash
 git clone <url-del-repo>
-cd <carpeta-del-repo>
+cd PDI-TP1-G18
 python -m venv .venv
 source .venv/bin/activate        # en Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -39,15 +36,12 @@ pip install -r requirements.txt
 
 ## Uso
 
-Cada problema se ejecuta con un solo comando desde la raíz del repositorio:
-
 ```bash
-python problema1.py              # Problema 1
-python problema2.py              # Problema 2: valida las 4 planillas
-python figuras_problema2.py      # (opcional) regenera las figuras de este README
+python problema1.py
+python problema2.py
 ```
 
-Los resultados se guardan en `resultados/`. Las imágenes de entrada están en `data/`.
+Cada script lee sus imágenes de `data/` y guarda los resultados en `resultados/problema1/` o `resultados/problema2/`. Al terminar abre una ventana con las figuras.
 
 ## Estructura del repositorio
 
@@ -55,90 +49,78 @@ Los resultados se guardan en `resultados/`. Las imágenes de entrada están en `
 .
 ├── README.md
 ├── requirements.txt
-├── problema1.py                 # Problema 1
-├── problema2.py                 # Problema 2
-├── figuras_problema2.py         # figuras del pipeline para este README
-├── data/                        # imágenes del enunciado
-│   ├── Imagen_con_detalles_escondidos.tif
-│   ├── grade_sheet_1.png … grade_sheet_4.png
-│   └── grade_sheet_empty.png
-├── resultados/
-│   ├── problema1/
-│   └── problema2/               # CSV, imagen de salida y validación de cada planilla
-└── docs/img/                    # figuras usadas en este README
+├── problema1.py
+├── problema2.py
+├── data/                  # imágenes del enunciado
+├── docs/                  # enunciado e informe
+└── resultados/
+    ├── problema1/         # figuras de la ecualización
+    └── problema2/         # CSV por planilla e imagen de alumnos no aprobados
 ```
+
+## Problema 1
+
+`ecualizacion_local(img, M, N)` recorre la imagen con una ventana de M×N. En cada posición ecualiza el histograma de la ventana y se queda solo con el valor del píxel central. Los bordes se completan replicando los píxeles del borde (`cv2.copyMakeBorder` con `BORDER_REPLICATE`).
+
+**Ecualización global contra local (ventana 31×31):**
+
+<p align="center"><img src="resultados/problema1/p1_global_vs_local.png" width="90%" alt="Imagen original, ecualización global y ecualización local con sus histogramas"></p>
+
+**Efecto del tamaño de ventana** (3×3, 7×7, 15×15, 31×31, 71×71 y 5×31):
+
+<p align="center"><img src="resultados/problema1/p1_ventanas.png" width="90%" alt="Ecualización local con distintos tamaños de ventana"></p>
+
+## Problema 2
 
 ### Cómo funciona
 
-#### 1. Detección de la grilla por proyecciones
+**1. Detección de la grilla.** La imagen se binariza y se suman los píxeles oscuros de cada fila y de cada columna. Las líneas de la tabla generan picos mucho más altos que el texto: todo lo que supera el 60 % del pico máximo se toma como línea. Como el umbral es relativo, funciona igual en las cuatro planillas aunque tengan distinto tamaño. Las 20 filas de datos empiezan en la línea que cierra el encabezado.
 
-La imagen se binariza (tinta = 1) y se suman los píxeles de cada fila y de cada columna. Las líneas de la tabla atraviesan toda la planilla, así que generan picos mucho más altos que el texto. Todo lo que supera el 60 % del pico máximo se toma como línea.
+**2. Caracteres y palabras.** Cada celda se recorta 3 px hacia adentro, para no arrastrar restos de las líneas, y se buscan sus componentes conectadas. Cada componente es, en general, un carácter. Tres ajustes hacen que el conteo sea correcto:
 
-<p align="center"><img src="docs/img/p2_01_proyecciones.png" width="95%" alt="Imagen binarizada y gráficos de suma por filas y por columnas con el umbral"></p>
+- Se descartan solo las componentes de 2 px o menos, para no perder el guion (4–5 px) ni el punto (3 px).
+- Letras pegadas: cada componente cuenta `round(ancho / (0.8 × alto de letra))` caracteres. Una letra normal da 1 y dos letras que se tocan dan 2, como los ceros de `100`.
+- Un hueco entre componentes mayor a 0.6 × alto de letra es un espacio, es decir, una palabra nueva.
 
-El umbral es **relativo al máximo**, no un número fijo de píxeles. Por eso funciona igual en las cuatro planillas, aunque tengan distinto tamaño y proporciones. Las filas de datos se toman como las **20 de abajo de todo**, así no importa cómo esté armado el encabezado.
+**3. ¿L o R?** Para la imagen de salida hay que distinguir la letra de la condición final sin OCR. Se usan dos medidas de la letra: relleno (área de tinta / área de la caja) y proporción ancho / alto.
 
-<p align="center"><img src="docs/img/p2_02_grilla.png" width="100%" alt="Las cuatro planillas con la grilla detectada"></p>
-
-#### 2. Caracteres y palabras en cada celda
-
-Cada celda se recorta 3 px hacia adentro, para no arrastrar restos de las líneas. Después se buscan las **componentes conectadas**: cada una es, en general, una letra. Tres detalles hacen que el conteo sea correcto:
-
-- **Filtro de área mínimo (> 2 px).** El guion mide 4–5 px y el punto 3 px. Un filtro más agresivo los borra, y entonces todos los legajos válidos quedan con 7 caracteres.
-- **Letras pegadas.** En esta fuente ninguna letra es más ancha que alta. Si una componente mide unas dos alturas de ancho, son dos letras que se tocan, como los ceros de `100`.
-- **Espacios.** Un hueco entre componentes mayor a media altura de letra es un espacio. Medido sobre las cuatro planillas, los huecos dentro de una palabra van de 0 a 4 px y los espacios de 10 a 13 px. Se usa la altura y no el ancho de las letras porque el ancho varía mucho (`1` contra `M`).
-
-<p align="center"><img src="docs/img/p2_03_celdas.png" width="95%" alt="Seis celdas de ejemplo con las cajas de cada componente y los espacios detectados"></p>
-
-#### 3. ¿Recupera o libre? (punto b)
-
-Para armar la imagen de salida hay que saber si la condición es `L` o `R`. Se resuelve con dos rasgos de forma, sin OCR:
-
-| Letra | Agujeros | Trazo vertical a la izquierda |
-|---|---|---|
-| L | 0 | sí |
-| R | 1 | sí (100 % de las filas) |
-| A | 1 | no (≈ 33–42 % de las filas) |
-
-<p align="center"><img src="docs/img/p2_04_condicion.png" width="65%" alt="Las letras L, R y A con sus agujeros y su trazo izquierdo marcados"></p>
+| Letra | Relleno | Ancho / alto | Regla |
+|---|---|---|---|
+| R | 0.47 – 0.49 | 0.67 – 0.90 | relleno > 0.42 |
+| A | 0.36 – 0.37 | 0.92 – 1.00 | si no es R, ancho / alto > 0.8 |
+| L | 0.23 – 0.36 | 0.58 – 0.70 | el resto |
 
 ### Resultados
 
-| Planilla | Legajo | Nombre | Parcial 1 | Parcial 2 | Parcial 3 | Condición | **Registros 100 % OK** | Recuperan | Libres |
+| Planilla | Legajo | Nombre | Parcial 1 | Parcial 2 | Parcial 3 | Condición | Registros 100 % OK | Recuperan | Libres |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 | grade_sheet_1 | 15/20 | 15/20 | 15/20 | 15/20 | 15/20 | 15/20 | **15/20** | 4 | 6 |
 | grade_sheet_2 | 12/20 | 11/20 | 13/20 | 16/20 | 13/20 | 12/20 | **3/20** | 0 | 3 |
 | grade_sheet_3 | 10/20 | 11/20 | 13/20 | 15/20 | 12/20 | 12/20 | **0/20** | 0 | 0 |
 | grade_sheet_4 | 14/20 | 13/20 | 16/20 | 15/20 | 15/20 | 14/20 | **6/20** | 2 | 2 |
 
-Los resultados se contrastaron con una validación hecha a mano de las 480 celdas de las cuatro planillas: **coinciden en todas**.
+Los resultados coinciden con una validación hecha a mano de las 480 celdas de las cuatro planillas.
 
-**Imagen de salida (punto b)**, una por planilla. Naranja = recupera, rojo = libre:
+**Imagen de salida (punto b).** Una sola imagen con los alumnos no aprobados de las cuatro planillas. Naranja = recupera, rojo = libre.
 
-<table>
-  <tr>
-    <td align="center" valign="top"><img src="resultados/problema2/grade_sheet_1_salida.png" width="380"><br><code>grade_sheet_1</code></td>
-    <td align="center" valign="top"><img src="resultados/problema2/grade_sheet_4_salida.png" width="380"><br><code>grade_sheet_4</code></td>
-  </tr>
-</table>
+<p align="center"><img src="resultados/problema2/alumnos_no_aprobados.png" width="420" alt="Nombres de los alumnos que recuperan o quedaron libres"></p>
 
-Las salidas de [`grade_sheet_2`](resultados/problema2/grade_sheet_2_salida.png) y [`grade_sheet_3`](resultados/problema2/grade_sheet_3_salida.png) están en `resultados/problema2/`. La planilla 3 no tiene ningún registro completamente correcto, así que su imagen lo indica.
-
-**CSV (punto c).** Un archivo por planilla. El `ID` corresponde al número de fila:
+**CSV (punto c).** Un archivo por planilla, `resultados_grade_sheet_<id>.csv`. El `ID` es el número de fila:
 
 ```csv
-ID,Legajo,Nombre y apellido,Parcial 1,Parcial 2,Parcial 3,Condición Final
-1,OK,MAL,OK,OK,OK,OK
-2,OK,OK,OK,OK,MAL,OK
-3,MAL,MAL,OK,OK,OK,OK
+ID,Legajo,Nombre y Apellido,Parcial 1,Parcial 2,Parcial 3,Condición Final
+1,OK,OK,OK,OK,OK,OK
+2,OK,OK,OK,OK,OK,OK
+3,MAL,MAL,MAL,MAL,MAL,MAL
 ```
 
-**Terminal (punto a)**, con el formato del enunciado:
+**Terminal (punto a):**
 
 ```
+##### grade_sheet_1
 > Registro 1:
 > Legajo: OK
-> Nombre y apellido: MAL
+> Nombre y Apellido: OK
 > Parcial 1: OK
 ...
 ```
@@ -147,8 +129,6 @@ ID,Legajo,Nombre y apellido,Parcial 1,Parcial 2,Parcial 3,Condición Final
 
 | Nombre |
 |---|
-|María Florencia Gomez|
-|Candela Stefano|
-|Julián Rapanelli|
-
----
+| María Florencia Gomez |
+| Candela Stefano |
+| Julián Rapanelli |
